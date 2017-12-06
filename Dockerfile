@@ -3,7 +3,7 @@ FROM alpine:3.6
 LABEL maintainer="Yves Blusseau <90z7oey02@sneakemail.com> (@blusseau)"
 
 ENV DEBUG=false \
-    DOCKER_GEN_VERSION="0.7.4_1" \
+    DOCKER_GEN_VERSION="0.7.5" \
     DOCKER_HOST=unix:///var/run/docker.sock
 
 # Install packages required by the image
