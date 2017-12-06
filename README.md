@@ -25,16 +25,17 @@ $ docker run -d -p 80:80 -p 443:443 \
     -v /etc/nginx/vhost.d \
     -v /usr/share/nginx/html \
     -v /var/run/docker.sock:/tmp/docker.sock:ro \
-    --label com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true \
+    --label com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy \
     jwilder/nginx-proxy
 ```
-The "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true" label is needed so that the letsencrypt container knows which nginx proxy container to use.
+The "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy" label is needed so that the letsencrypt container knows which nginx proxy container to use.
 
 * Second start this container:
 ```bash
 $ docker run -d \
     -v /path/to/certs:/etc/nginx/certs:rw \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    --volumes-from nginx-proxy \
     jrcs/letsencrypt-nginx-proxy-companion
 ```
 
@@ -57,7 +58,7 @@ To run nginx proxy as a separate container you'll need:
 curl https://raw.githubusercontent.com/jwilder/nginx-proxy/master/nginx.tmpl > /path/to/nginx.tmpl
 ```
 
-2) Set the `NGINX_DOCKER_GEN_CONTAINER` environment variable to the name or id of the docker-gen container.
+2) Use the `com.github.jrcs.letsencrypt_nginx_proxy_companion.docker_gen` label on the docker-gen container, or explicitly set the `NGINX_DOCKER_GEN_CONTAINER` environment variable to the name or id of that container.
 
 Examples:
 
@@ -69,7 +70,7 @@ $ docker run -d -p 80:80 -p 443:443 \
     -v /etc/nginx/vhost.d \
     -v /usr/share/nginx/html \
     -v /path/to/certs:/etc/nginx/certs:ro \
-    --label com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true \
+    --label com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy \
     nginx
 ```
 
@@ -80,21 +81,42 @@ $ docker run -d \
     --volumes-from nginx \
     -v /path/to/nginx.tmpl:/etc/docker-gen/templates/nginx.tmpl:ro \
     -v /var/run/docker.sock:/tmp/docker.sock:ro \
+    --label com.github.jrcs.letsencrypt_nginx_proxy_companion.docker_gen \
     jwilder/docker-gen \
     -notify-sighup nginx -watch -wait 5s:30s /etc/docker-gen/templates/nginx.tmpl /etc/nginx/conf.d/default.conf
 ```
 
-* Then start this container (NGINX_DOCKER_GEN_CONTAINER variable must contain the docker-gen container name or id):
+* Then start this container:
 ```bash
 $ docker run -d \
     --name nginx-letsencrypt \
-    -e "NGINX_DOCKER_GEN_CONTAINER=nginx-gen" \
     --volumes-from nginx \
     -v /path/to/certs:/etc/nginx/certs:rw \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
     jrcs/letsencrypt-nginx-proxy-companion
 ```
-Then start any containers to be proxied as described previously.
+
+* Then start any containers to be proxied as described previously.
+
+Note:
+If the 3 containers are using static names, both labels `com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy` on nginx container and `com.github.jrcs.letsencrypt_nginx_proxy_companion.docker_gen` on the docker-gen container can be removed.
+
+The docker environment variables to be set on the letsencrypt container are:
+* `NGINX_PROXY_CONTAINER` set to the name of the nginx container (here `nginx`)
+* `NGINX_DOCKER_GEN_CONTAINER` set to the name of the docker-gen container (here `nginx-gen`)
+
+Example:
+```bash
+$ docker run -d \
+    --name nginx-letsencrypt \
+    --volumes-from nginx \
+    -v /path/to/certs:/etc/nginx/certs:rw \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    -e NGINX_DOCKER_GEN_CONTAINER=nginx-gen \
+    -e NGINX_PROXY_CONTAINER=nginx \
+    jrcs/letsencrypt-nginx-proxy-companion
+```
+
 
 #### Let's Encrypt
 
@@ -107,10 +129,18 @@ Set the following environment variables to enable Let's Encrypt support for a co
 
 The `LETSENCRYPT_HOST` variable most likely needs to be the same as the `VIRTUAL_HOST` variable and must be publicly reachable domains. Specify multiple hosts with a comma delimiter.
 
-##### multi-domain ([SAN](https://www.digicert.com/subject-alternative-name.htm)) certificates
+The following environment variables are optional and parameterize the way the Let's Encrypt client works.
+
+- `LETSENCRYPT_KEYSIZE`
+
+The `LETSENCRYPT_KEYSIZE` variable determines the size of the requested key (in bit, defaults to 4096).
+
+**Note:** the `VIRTUAL_HOST` (or `LETSENCRYPT_HOST`) must be a reachable domain for LetEncrypt to be able to validate the challenge and provide the certificate.
+
+##### Multi-domain ([SAN](https://www.digicert.com/subject-alternative-name.htm)) certificates
 If you want to create multi-domain ([SAN](https://www.digicert.com/subject-alternative-name.htm)) certificates add the base domain as the first domain of the `LETSENCRYPT_HOST` environment variable.
 
-##### test certificates
+##### Test certificates
 If you want to create test certificates that don't have the 5 certs/week/domain limits define the `LETSENCRYPT_TEST` environment variable with a value of `true` (in the containers where you request certificates with LETSENCRYPT_HOST). If you want to do this globally for all containers, set ACME_CA_URI as described below.
 
 ##### Automatic certificate renewal
@@ -126,11 +156,30 @@ $ docker run -d \
     tutum/apache-php
 ```
 
+##### Force certificates renewal
+
+If needed, you can force a running letsencrypt-nginx-proxy-companion container to renew all certificates that are currently in use. Replace `nginx-letsencrypt` with the name of your letsencrypt-nginx-proxy-companion container in the following command:
+
+```bash
+$ docker exec nginx-letsencrypt /app/force_renew
+```
+
+##### ACME account keys
+By default the container will save the first ACME account key created for each ACME API endpoint used, and will reuse it for all subsequent authorizations and issuances requests made to this endpoint. This behavior is enabled by default to avoid running into Let's Encrypt account [rate limits](https://letsencrypt.org/docs/rate-limits/).
+
+For instance, when using the default Let's Encrypt production endpoint, the container will save the first account key created for this endpoint as `/etc/nginx/certs/accounts/acme-v01.api.letsencrypt.org/directory/default.json` and will reuse it for future requests made to this endpoint.
+
+If required, you can use multiple accounts for the same ACME API endpoint by using the `LETSENCRYPT_ACCOUNT_ALIAS` environment variable on your proxyed container. This instruct the letsencrypt_nginx_proxy_companion container to look for an account key named after the provided alias instead of `default.json`. For example, `LETSENCRYPT_ACCOUNT_ALIAS=client1` will use the key named `client1.json` in the corresponding ACME API endpoint folder for this proxyed container (or will create it if it does not exists yet).
+
+Please see the **One Account or Many?** paragraph on [Let's Encrypt Integration Guide](https://letsencrypt.org/docs/integration-guide/) for additional informations.
+
+If you want to disable the account key reutilization entirely, you can set the environment variable `REUSE_ACCOUNT_KEYS` to `false` on the letsencrypt_nginx_proxy_companion container. This creates a new ACME registration with a corresponding account key for each new certificate issuance. Note that this won't create new account keys for certs already issued before `REUSE_ACCOUNT_KEYS` is set to `false`. This is not recommended unless you have specific reasons to do so.
+
 #### Optional container environment variables
 
 Optional letsencrypt-nginx-proxy-companion container environment variables for custom configuration.
 
-* `ACME_CA_URI` - Directory URI for the CA ACME API endpoint (default: ``https://acme-v01.api.letsencrypt.org/directory``). If you set it's value to `https://acme-staging.api.letsencrypt.org/directory` letsencrypt will use test servers that don't have the 5 certs/week/domain limits. You can also create test certificates per container (see [let's encrypt test certificates](https://github.com/JrCs/docker-letsencrypt-nginx-proxy-companion/blob/doc/README.md#test-certificates))
+* `ACME_CA_URI` - Directory URI for the CA ACME API endpoint (default: ``https://acme-v01.api.letsencrypt.org/directory``). If you set it's value to `https://acme-staging.api.letsencrypt.org/directory` letsencrypt will use test servers that don't have the 5 certs/week/domain limits. You can also create test certificates per container (see [let's encrypt test certificates](#test-certificates))
 
 For example
 
@@ -145,7 +194,13 @@ $ docker run -d \
 
 * `DEBUG` - Set it to `true` to enable debugging of the entrypoint script and generation of LetsEncrypt certificates, which could help you pin point any configuration issues.
 
-* The "com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy=true" label - set this label on the nginx-proxy container to tell the docker-letsencrypt-nginx-proxy-companion container to use it as the proxy.
+* `REUSE_ACCOUNT_KEYS` - Set it to `false` to disable the account keys reutilization (see [ACME account keys](#acme-account-keys)).
+
+* `REUSE_KEY` - Set it to `true` to make simp_le reuse previously generated private key instead of creating a new one on certificate renewal. Recommended if you intend to use HPKP.
+
+* The `com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy` label - set this label on the nginx-proxy container to tell the docker-letsencrypt-nginx-proxy-companion container to use it as the proxy.
+
+* The `com.github.jrcs.letsencrypt_nginx_proxy_companion.docker_gen` label - set this label on the docker-gen container to tell the docker-letsencrypt-nginx-proxy-companion container to use it as the docker-gen when it's split from nginx (separate containers).
 
 * `ACME_TOS_HASH` - Let´s you pass an alternative TOS hash to simp_le, to support other CA´s ACME implentation.
 
@@ -153,8 +208,11 @@ $ docker run -d \
 
 #### Examples:
 
-If you want other examples how to use this container, look at: 
+If you want other examples how to use this container, look at:
 
+* [Evert Ramos's Examples](https://github.com/evertramos/docker-compose-letsencrypt-nginx-proxy-companion) - using docker-compose version '3'
 * [Karl Fathi's Examples](https://github.com/fatk/docker-letsencrypt-nginx-proxy-companion-examples)
 * [More examples from Karl](https://github.com/pixelfordinner/pixelcloud-docker-apps/tree/master/nginx-proxy)
-* [George Ilyes' Examples](https://github.com/gilyes/docker-nginx-letsencrypt-sample) 
+* [George Ilyes' Examples](https://github.com/gilyes/docker-nginx-letsencrypt-sample)
+* [Dmitry's simple docker-compose example](https://github.com/dmitrym0/simple-lets-encrypt-docker-compose-sample)
+* [Radek's docker-compose jenkins example](https://github.com/dataminelab/docker-jenkins-nginx-letsencrypt)
