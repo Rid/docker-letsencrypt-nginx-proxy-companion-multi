@@ -10,7 +10,7 @@
 
 add_location_configuration() {
     local domain="${1:-}"
-    [[ -z "$domain" || ! -f "${VHOST_DIR}/${domain}" ]] && domain=default
+    [[ -z "$domain" || ! -f "${VHOST_DIR}/${domain}" ]] && domain=default_location
     [[ -f "${VHOST_DIR}/${domain}" && \
        -n $(sed -n "/$START_HEADER/,/$END_HEADER/p" "${VHOST_DIR}/${domain}") ]] && return 0
     echo "$START_HEADER" > "${VHOST_DIR}/${domain}".new
