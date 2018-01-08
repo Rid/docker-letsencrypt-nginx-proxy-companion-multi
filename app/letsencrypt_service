@@ -142,7 +142,8 @@ update_certs() {
             --cert_key_size=$cert_keysize \
             --email "${!email_varname}" \
             --server=$acme_ca_uri \
-            --default_root /usr/share/nginx/html/
+            --default_root /usr/share/nginx/html/ \
+            -v
 
         simp_le_return=$?
 
