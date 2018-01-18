@@ -1,6 +1,6 @@
 #!/bin/bash
 
-until nc -z $(docker inspect --format='{{.NetworkSettings.IPAddress}}' server-nginx-proxy.server-cylo) 80; do echo "waiting for service in container..."; sleep 0.5; done
+until nc -z ${NGINX_PROXY_CONTAINER} 80; do echo "waiting for service in container..."; sleep 0.5; done
 
 # SIGTERM-handler
 term_handler() {
